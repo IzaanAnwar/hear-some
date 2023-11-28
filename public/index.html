@@ -1,89 +1,104 @@
-<!DOCTYPE html>
+<!-- public/index.html -->
+
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audio Chat App</title>
-  <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
-</head>
-<>
- 
-<h1>Audio Chat App</h1>
-<div id="messages"></div>
-<audio id="remoteAudio" autoplay></audio>
-<input type="text" id="messageInput" placeholder="Type a message">
-<button onclick="sendMessage()">Send</button>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Audio Chat</title>
+    <style>
+      #audio-box {
+        border: 1px solid #ccc;
+        padding: 10px;
+      }
+    </style>
+  </head>
 
-<script>
-  const socket = io();
-  let peerConnection;
+  <body>
+    <h1>WebRTC Audio Chat</h1>
+    <div>
+      <label for="room-input">Enter Room Name:</label>
+      <input type="text" id="room-input" />
+      <button onclick="joinRoom()">Join Room</button>
+    </div>
+    <div id="audio-box"></div>
 
-  socket.on('message', (message) => {
-    const messagesDiv = document.getElementById('messages');
-    messagesDiv.innerHTML += `<p>${message}</p>`;
-  });
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      let localStream;
+      let peerConnections = {};
 
-  function sendMessage() {
-    const messageInput = document.getElementById('messageInput');
-    const message = messageInput.value;
-    socket.emit('message', message);
-    messageInput.value = '';
-  }
+      const joinRoom = () => {
+        const roomInput = document.getElementById("room-input");
+        const roomName = roomInput.value.trim();
 
-  // WebRTC logic
-  async function startCall() {
-    const constraints = { audio: true };
-    const localStream = await navigator.mediaDevices.getUserMedia(constraints);
-    const remoteAudio = document.getElementById('remoteAudio');
-    remoteAudio.srcObject = localStream;
+        socket.emit("join-room", roomName);
 
-    peerConnection = new RTCPeerConnection();
+        navigator.mediaDevices
+          .getUserMedia({ audio: true })
+          .then((stream) => {
+            localStream = stream;
+            const audio = new Audio();
+            audio.srcObject = stream;
+            audio.play();
 
-    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+            socket.on("user-connected", (userId, clients) => {
+              console.log("User connected:", userId);
+              createPeerConnection(userId, stream);
+              clients.forEach((client) => {
+                if (client !== userId && !peerConnections[client]) {
+                  createPeerConnection(client, stream);
+                }
+              });
+            });
 
-    // Event triggered when the remote stream is added
-    peerConnection.ontrack = (event) => {
-      remoteAudio.srcObject = event.streams[0];
-    };
+            socket.on("user-disconnected", (userId, clients) => {
+              console.log("User disconnected:", userId);
+              if (peerConnections[userId]) {
+                peerConnections[userId].close();
+                delete peerConnections[userId];
+              }
+            });
+          })
+          .catch((error) =>
+            console.error("Error accessing microphone:", error)
+          );
+      };
 
-    // Event triggered when an ICE candidate is received
-    socket.on('ice-candidate', (candidate) => {
-      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    });
+      const createPeerConnection = (userId, stream) => {
+        const peerConnection = new RTCPeerConnection();
 
-    // Create and send an offer to the other peer
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    socket.emit('offer', offer);
-  }
+        peerConnection.addStream(stream);
 
-  startCall();
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit("ice-candidate", event.candidate, userId);
+          }
+        };
 
-  // Event triggered when an offer is received
-  socket.on('offer', async (offer) => {
-    peerConnection = new RTCPeerConnection();
+        peerConnection.onnegotiationneeded = () => {
+          peerConnection
+            .createOffer()
+            .then((offer) => {
+              return peerConnection.setLocalDescription(offer);
+            })
+            .then(() => {
+              socket.emit("offer", peerConnection.localDescription, userId);
+            });
+        };
 
-    // Event triggered when the remote stream is added
-    peerConnection.ontrack = (event) => {
-      remoteAudio.srcObject = event.streams[0];
-    };
+        peerConnection.onaddstream = (event) => {
+          const audioBox = document.getElementById("audio-box");
+          const audioElement = document.createElement("audio");
+          audioElement.srcObject = event.stream;
+          audioElement.play();
+          audioBox.appendChild(audioElement);
+        };
 
-    // Event triggered when an ICE candidate is received
-    socket.on('ice-candidate', (candidate) => {
-      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    });
-
-    // Set the remote description and create an answer
-    await peerConnection.setRemoteDescription(offer);
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.emit('answer', answer);
-  });
-
-  // Event triggered when an answer is received
-  socket.on('answer', async (answer) => {
-    await peerConnection.setRemoteDescription(answer);
-  });
-</script>
-</body>
+        peerConnections[userId] = peerConnection;
+        return peerConnection;
+      };
+    </script>
+  </body>
 </html>

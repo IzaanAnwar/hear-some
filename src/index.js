@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const socketIO = require("socket.io");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const server = http.createServer(app);
@@ -8,30 +9,58 @@ const io = socketIO(server);
 
 app.use(express.static("public"));
 
+// Store room information
+const rooms = {};
+
 io.on("connection", (socket) => {
-  console.log("a user connected");
+  console.log("User Joined", socket.id);
 
-  socket.on("offer", (offer) => {
-    console.log("Received offer");
-    socket.broadcast.emit("offer", offer);
-  });
+  // Handle room creation and joining
+  socket.on("join-room", (roomName) => {
+    console.log("room =>", roomName);
 
-  socket.on("answer", (answer) => {
-    console.log("Received answer");
-    socket.broadcast.emit("answer", answer);
-  });
+    if (!rooms[roomName]) {
+      rooms[roomName] = {
+        id: uuidv4(),
+        clients: [],
+      };
+    }
 
-  socket.on("ice-candidate", (candidate) => {
-    console.log("Received ICE candidate");
-    socket.broadcast.emit("ice-candidate", candidate);
-  });
+    socket.join(roomName);
+    rooms[roomName].clients.push(socket.id);
 
-  socket.on("message", (message) => {
-    console.log("message:", message);
-    io.emit("message", message); // Broadcast the message to all clients
-  });
-  socket.on("disconnect", () => {
-    console.log("user disconnected");
+    io.to(roomName).emit("user-connected", socket.id, rooms[roomName].clients);
+
+    socket.on("offer", (offer, targetSocketId) => {
+      console.log("offer =>", offer, targetSocketId);
+      socket.to(targetSocketId).emit("offer", offer, socket.id);
+    });
+
+    socket.on("answer", (answer, targetSocketId) => {
+      console.log("answer =>", answer, targetSocketId);
+      socket.to(targetSocketId).emit("answer", answer, socket.id);
+    });
+
+    socket.on("ice-candidate", (candidate, targetSocketId) => {
+      console.log("ice-candidate =>", candidate, targetSocketId);
+      socket.to(targetSocketId).emit("ice-candidate", candidate, socket.id);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("User Disconnected");
+      const index = rooms[roomName].clients.indexOf(socket.id);
+      if (index !== -1) {
+        rooms[roomName].clients.splice(index, 1);
+        io.to(roomName).emit(
+          "user-disconnected",
+          socket.id,
+          rooms[roomName].clients
+        );
+      }
+      if (rooms[roomName].clients.length === 0) {
+        delete rooms[roomName];
+      }
+    });
   });
 });
 
