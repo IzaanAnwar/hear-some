@@ -3,100 +3,206 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebRTC Audio Chat</title>
+    <title>WebRTC Voice Chat</title>
     <style>
-      #audio-box {
-        border: 1px solid #ccc;
+      body {
+        font-family: "Arial", sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f4;
+      }
+
+      header {
+        background-color: #333;
+        color: white;
         padding: 10px;
+        text-align: center;
+      }
+
+      #main {
+        max-width: 600px;
+        margin: 20px auto;
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: bold;
+      }
+
+      input,
+      button {
+        padding: 8px;
+        margin-bottom: 16px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        width: calc(100% - 18px);
+        box-sizing: border-box;
+      }
+
+      button {
+        background-color: #4caf50;
+        color: white;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      div {
+        margin-bottom: 20px;
+      }
+
+      #localAudio,
+      #remoteAudio {
+        width: 100%;
+        margin-top: 16px;
+      }
+
+      #localAudio {
+        background-color: antiquewhite;
+      }
+
+      #remoteAudio {
+        background-color: burlywood;
       }
     </style>
   </head>
-
   <body>
-    <h1>WebRTC Audio Chat</h1>
-    <div>
-      <label for="room-input">Enter Room Name:</label>
-      <input type="text" id="room-input" />
-      <button onclick="joinRoom()">Join Room</button>
-    </div>
-    <div id="audio-box"></div>
+    <header>
+      <h1>WebRTC Voice Chat</h1>
+    </header>
+
+    <section id="main">
+      <div>
+        <label for="roomInput">Room Name:</label>
+        <input type="text" id="roomInput" />
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="leaveRoom()">Leave Room</button>
+      </div>
+      <div>
+        <label for="localAudio">Local Audio:</label>
+        <audio id="localAudio" controls muted></audio>
+      </div>
+      <div style="background-color: burlywood; padding: 16px">
+        <label for="remoteAudio">Remote Audio:</label>
+        <audio id="remoteAudio" controls></audio>
+      </div>
+    </section>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
       const socket = io();
-      let localStream;
-      let peerConnections = {};
+      const roomInput = document.getElementById("roomInput");
+      const localAudio = document.getElementById("localAudio");
+      const remoteAudio = document.getElementById("remoteAudio");
+      let localPeerConnection;
+      let remotePeerConnection;
 
-      const joinRoom = () => {
-        const roomInput = document.getElementById("room-input");
-        const roomName = roomInput.value.trim();
+      function joinRoom() {
+        const roomName = roomInput.value;
+        if (roomName.trim() === "") {
+          alert("Please enter a room name.");
+          return;
+        }
 
-        socket.emit("join-room", roomName);
+        socket.emit("createRoom", roomName);
 
+        localPeerConnection = new RTCPeerConnection();
         navigator.mediaDevices
-          .getUserMedia({ audio: true })
+          .getUserMedia({ audio: true, video: false })
           .then((stream) => {
-            localStream = stream;
-            const audio = new Audio();
-            audio.srcObject = stream;
-            audio.play();
+            localAudio.srcObject = stream;
+            localPeerConnection.addStream(stream);
 
-            socket.on("user-connected", (userId, clients) => {
-              console.log("User connected:", userId);
-              createPeerConnection(userId, stream);
-              clients.forEach((client) => {
-                if (client !== userId && !peerConnections[client]) {
-                  createPeerConnection(client, stream);
-                }
-              });
-            });
-
-            socket.on("user-disconnected", (userId, clients) => {
-              console.log("User disconnected:", userId);
-              if (peerConnections[userId]) {
-                peerConnections[userId].close();
-                delete peerConnections[userId];
+            localPeerConnection.onicecandidate = (event) => {
+              if (event.candidate) {
+                socket.emit("iceCandidate", {
+                  room: roomName,
+                  candidate: event.candidate,
+                });
               }
-            });
+            };
+
+            localPeerConnection
+              .createOffer()
+              .then((offer) => localPeerConnection.setLocalDescription(offer))
+              .then(() => {
+                socket.emit("offer", {
+                  room: roomName,
+                  offer: localPeerConnection.localDescription,
+                });
+              })
+              .catch((error) => {
+                console.error("Error creating offer:", error);
+              });
           })
-          .catch((error) =>
-            console.error("Error accessing microphone:", error)
-          );
-      };
+          .catch((error) => {
+            console.error("Error accessing user media:", error);
+          });
 
-      const createPeerConnection = (userId, stream) => {
-        const peerConnection = new RTCPeerConnection();
+        socket.on("offer", (offer) => {
+          remotePeerConnection = new RTCPeerConnection();
+          navigator.mediaDevices
+            .getUserMedia({ audio: true, video: false })
+            .then((stream) => {
+              remoteAudio.srcObject = stream;
+              remotePeerConnection.addStream(stream);
 
-        peerConnection.addStream(stream);
+              remotePeerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                  socket.emit("iceCandidate", {
+                    room: roomName,
+                    candidate: event.candidate,
+                  });
+                }
+              };
 
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) {
-            socket.emit("ice-candidate", event.candidate, userId);
-          }
-        };
+              remotePeerConnection.setRemoteDescription(
+                new RTCSessionDescription(offer)
+              );
 
-        peerConnection.onnegotiationneeded = () => {
-          peerConnection
-            .createOffer()
-            .then((offer) => {
-              return peerConnection.setLocalDescription(offer);
+              return remotePeerConnection.createAnswer();
             })
+            .then((answer) => remotePeerConnection.setLocalDescription(answer))
             .then(() => {
-              socket.emit("offer", peerConnection.localDescription, userId);
+              socket.emit("answer", {
+                room: roomName,
+                answer: remotePeerConnection.localDescription,
+              });
+            })
+            .catch((error) => {
+              console.error("Error creating answer:", error);
             });
-        };
+        });
 
-        peerConnection.onaddstream = (event) => {
-          const audioBox = document.getElementById("audio-box");
-          const audioElement = document.createElement("audio");
-          audioElement.srcObject = event.stream;
-          audioElement.play();
-          audioBox.appendChild(audioElement);
-        };
+        socket.on("answer", (answer) => {
+          localPeerConnection.setRemoteDescription(
+            new RTCSessionDescription(answer)
+          );
+        });
 
-        peerConnections[userId] = peerConnection;
-        return peerConnection;
-      };
+        socket.on("iceCandidate", (candidate) => {
+          localPeerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+      }
+
+      function leaveRoom() {
+        if (localPeerConnection) {
+          localPeerConnection.close();
+        }
+        if (remotePeerConnection) {
+          remotePeerConnection.close();
+        }
+
+        localAudio.srcObject = null;
+        remoteAudio.srcObject = null;
+      }
     </script>
   </body>
 </html>

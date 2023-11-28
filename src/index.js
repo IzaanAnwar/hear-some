@@ -1,7 +1,6 @@
 const express = require("express");
 const http = require("http");
 const socketIO = require("socket.io");
-const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const server = http.createServer(app);
@@ -9,58 +8,28 @@ const io = socketIO(server);
 
 app.use(express.static("public"));
 
-// Store room information
-const rooms = {};
-
 io.on("connection", (socket) => {
-  console.log("User Joined", socket.id);
+  console.log("A user connected");
 
-  // Handle room creation and joining
-  socket.on("join-room", (roomName) => {
-    console.log("room =>", roomName);
+  socket.on("disconnect", () => {
+    console.log("User disconnected");
+  });
 
-    if (!rooms[roomName]) {
-      rooms[roomName] = {
-        id: uuidv4(),
-        clients: [],
-      };
-    }
-
+  socket.on("createRoom", (roomName) => {
     socket.join(roomName);
-    rooms[roomName].clients.push(socket.id);
+    console.log(`User joined room: ${roomName}`);
+  });
 
-    io.to(roomName).emit("user-connected", socket.id, rooms[roomName].clients);
+  socket.on("offer", (data) => {
+    io.to(data.room).emit("offer", data.offer);
+  });
 
-    socket.on("offer", (offer, targetSocketId) => {
-      console.log("offer =>", offer, targetSocketId);
-      socket.to(targetSocketId).emit("offer", offer, socket.id);
-    });
+  socket.on("answer", (data) => {
+    io.to(data.room).emit("answer", data.answer);
+  });
 
-    socket.on("answer", (answer, targetSocketId) => {
-      console.log("answer =>", answer, targetSocketId);
-      socket.to(targetSocketId).emit("answer", answer, socket.id);
-    });
-
-    socket.on("ice-candidate", (candidate, targetSocketId) => {
-      console.log("ice-candidate =>", candidate, targetSocketId);
-      socket.to(targetSocketId).emit("ice-candidate", candidate, socket.id);
-    });
-
-    socket.on("disconnect", () => {
-      console.log("User Disconnected");
-      const index = rooms[roomName].clients.indexOf(socket.id);
-      if (index !== -1) {
-        rooms[roomName].clients.splice(index, 1);
-        io.to(roomName).emit(
-          "user-disconnected",
-          socket.id,
-          rooms[roomName].clients
-        );
-      }
-      if (rooms[roomName].clients.length === 0) {
-        delete rooms[roomName];
-      }
-    });
+  socket.on("iceCandidate", (data) => {
+    io.to(data.room).emit("iceCandidate", data.candidate);
   });
 });
 
