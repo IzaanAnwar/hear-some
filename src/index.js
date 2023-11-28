@@ -1,9 +1,9 @@
-import express from "express";
-import { createServer } from "http";
-import socketIO from "socket.io";
+const express = require("express");
+const http = require("http");
+const socketIO = require("socket.io");
 
 const app = express();
-const server = createServer(app);
+const server = http.createServer(app);
 const io = socketIO(server);
 
 app.use(express.static("public"));
