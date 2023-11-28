@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Chat App</title>
+  <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>Audio Chat App</h1>
+  <div id="messages"></div>
+  <audio id="remoteAudio" autoplay></audio>
+  <input type="text" id="messageInput" placeholder="Type a message">
+  <button onclick="sendMessage()">Send</button>
+
+  <script>
+    const socket = io();
+    let peerConnection;
+
+    socket.on('message', (message) => {
+      const messagesDiv = document.getElementById('messages');
+      messagesDiv.innerHTML += `<p>${message}</p>`;
+    });
+
+    function sendMessage() {
+      const messageInput = document.getElementById('messageInput');
+      const message = messageInput.value;
+      socket.emit('message', message);
+      messageInput.value = '';
+    }
+
+    // WebRTC logic
+    async function startCall() {
+      const constraints = { audio: true };
+      const localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const remoteAudio = document.getElementById('remoteAudio');
+      remoteAudio.srcObject = localStream;
+
+      peerConnection = new RTCPeerConnection();
+
+      localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('ice-candidate', event.candidate);
+        }
+      };
+
+      socket.on('ice-candidate', (candidate) => {
+        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      });
+    }
+
+    startCall();
+  </script>
+</body>
+</body>
+</html>
