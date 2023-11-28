@@ -6,53 +6,84 @@
   <title>Audio Chat App</title>
   <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
 </head>
-<body>
-  <h1>Audio Chat App</h1>
-  <div id="messages"></div>
-  <audio id="remoteAudio" autoplay></audio>
-  <input type="text" id="messageInput" placeholder="Type a message">
-  <button onclick="sendMessage()">Send</button>
+<>
+ 
+<h1>Audio Chat App</h1>
+<div id="messages"></div>
+<audio id="remoteAudio" autoplay></audio>
+<input type="text" id="messageInput" placeholder="Type a message">
+<button onclick="sendMessage()">Send</button>
 
-  <script>
-    const socket = io();
-    let peerConnection;
+<script>
+  const socket = io();
+  let peerConnection;
 
-    socket.on('message', (message) => {
-      const messagesDiv = document.getElementById('messages');
-      messagesDiv.innerHTML += `<p>${message}</p>`;
+  socket.on('message', (message) => {
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.innerHTML += `<p>${message}</p>`;
+  });
+
+  function sendMessage() {
+    const messageInput = document.getElementById('messageInput');
+    const message = messageInput.value;
+    socket.emit('message', message);
+    messageInput.value = '';
+  }
+
+  // WebRTC logic
+  async function startCall() {
+    const constraints = { audio: true };
+    const localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const remoteAudio = document.getElementById('remoteAudio');
+    remoteAudio.srcObject = localStream;
+
+    peerConnection = new RTCPeerConnection();
+
+    localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+
+    // Event triggered when the remote stream is added
+    peerConnection.ontrack = (event) => {
+      remoteAudio.srcObject = event.streams[0];
+    };
+
+    // Event triggered when an ICE candidate is received
+    socket.on('ice-candidate', (candidate) => {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
-    function sendMessage() {
-      const messageInput = document.getElementById('messageInput');
-      const message = messageInput.value;
-      socket.emit('message', message);
-      messageInput.value = '';
-    }
+    // Create and send an offer to the other peer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit('offer', offer);
+  }
 
-    // WebRTC logic
-    async function startCall() {
-      const constraints = { audio: true };
-      const localStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const remoteAudio = document.getElementById('remoteAudio');
-      remoteAudio.srcObject = localStream;
+  startCall();
 
-      peerConnection = new RTCPeerConnection();
+  // Event triggered when an offer is received
+  socket.on('offer', async (offer) => {
+    peerConnection = new RTCPeerConnection();
 
-      localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
+    // Event triggered when the remote stream is added
+    peerConnection.ontrack = (event) => {
+      remoteAudio.srcObject = event.streams[0];
+    };
 
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('ice-candidate', event.candidate);
-        }
-      };
+    // Event triggered when an ICE candidate is received
+    socket.on('ice-candidate', (candidate) => {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    });
 
-      socket.on('ice-candidate', (candidate) => {
-        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      });
-    }
+    // Set the remote description and create an answer
+    await peerConnection.setRemoteDescription(offer);
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    socket.emit('answer', answer);
+  });
 
-    startCall();
-  </script>
-</body>
+  // Event triggered when an answer is received
+  socket.on('answer', async (answer) => {
+    await peerConnection.setRemoteDescription(answer);
+  });
+</script>
 </body>
 </html>
