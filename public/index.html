@@ -1,119 +1,156 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebRTC Voice Chat</title>
-    <style>
-      body {
-        font-family: "Arial", sans-serif;
-        margin: 0;
-        padding: 0;
-        background-color: #f4f4f4;
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebRTC Voice Chat</title>
+  <style>
+    body {
+      font-family: "Arial", sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f4;
+    }
+
+    header {
+      background-color: #333;
+      color: white;
+      padding: 10px;
+      text-align: center;
+    }
+
+    #main {
+      max-width: 600px;
+      margin: 20px auto;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+
+    input,
+    button {
+      padding: 8px;
+      margin-bottom: 16px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      width: calc(100% - 18px);
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #4caf50;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    div {
+      margin-bottom: 20px;
+    }
+
+    #localAudio,
+    #remoteAudio {
+      width: 100%;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>WebRTC Voice Chat</h1>
+  </header>
+
+  <section id="main">
+    <div>
+      <label for="roomInput">Room Name:</label>
+      <input type="text" id="roomInput" />
+      <label for="emailInput"> Email:</label>
+      <input type="text" id="emailInput" />
+      <button onclick="joinRoom()">Join Room</button>
+      <button onclick="leaveRoom()">Leave Room</button>
+    </div>
+    <div style="background-color: cadetblue; padding: 16px">
+      <label for="localAudio">Local Audio:</label>
+      <audio autoplay muted controls id="localAudio" muted></audi>
+    </div>
+    <div style="background-color: burlywood; padding: 16px">
+      <label for="remoteAudio">Remote Audio:</label>
+      <audio controls autoplay id="remoteAudio"></aud>
+    </div>
+  </section>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io("http://localhost:3000");
+    const roomInput = document.getElementById("roomInput");
+    const emailInput = document.getElementById("emailInput");
+    const localAudio = document.getElementById("localAudio");
+    const remoteAudio = document.getElementById("remoteAudio");
+    let localPeerConnection;
+    let remotePeerConnection;
+
+    function joinRoom() {
+      const roomName = roomInput.value;
+      const email = emailInput.value;
+      if (roomName.trim() === "") {
+        alert("Please enter a room name.");
+        return;
+      }
+      if (email.trim() === "") {
+        alert("Please enter your email Id.");
+        return;
       }
 
-      header {
-        background-color: #333;
-        color: white;
-        padding: 10px;
-        text-align: center;
-      }
+      socket.emit("join-room", { email, roomId: roomName });
 
-      #main {
-        max-width: 600px;
-        margin: 20px auto;
-        background-color: #fff;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-      }
+      localPeerConnection = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: [
+              "stun:stun.l.google.com:19302",
+              "stun:global.stun.twilio.com:3478",
+            ],
+          },
+        ],
+      });
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        .then((stream) => {
+          localAudio.srcObject = stream;
+          stream.getTracks().forEach((track) => {
+            localPeerConnection.addTrack(track, stream);
+          });
 
-      label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: bold;
-      }
+          localPeerConnection
+            .createOffer()
+            .then((offer) => {
+              socket.emit("call-user", {
+                to: roomName,
+                offer,
+              });
+              localPeerConnection.setLocalDescription(offer);
+            })
+            .catch((error) => {
+              console.error("Error creating/Sending offer:", error);
+            });
+        })
+        .catch((error) => {
+          console.error("Error accessing user media:", error);
+        });
 
-      input,
-      button {
-        padding: 8px;
-        margin-bottom: 16px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        width: calc(100% - 18px);
-        box-sizing: border-box;
-      }
-
-      button {
-        background-color: #4caf50;
-        color: white;
-        cursor: pointer;
-      }
-
-      button:hover {
-        background-color: #45a049;
-      }
-
-      div {
-        margin-bottom: 20px;
-      }
-
-      #localAudio,
-      #remoteAudio {
-        width: 100%;
-        margin-top: 16px;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>WebRTC Voice Chat</h1>
-    </header>
-
-    <section id="main">
-      <div>
-        <label for="roomInput">Room Name:</label>
-        <input type="text" id="roomInput" />
-        <label for="emailInput"> Email:</label>
-        <input type="text" id="emailInput" />
-        <button onclick="joinRoom()">Join Room</button>
-        <button onclick="leaveRoom()">Leave Room</button>
-      </div>
-      <div style="background-color: cadetblue; padding: 16px">
-        <label for="localAudio">Local Audio:</label>
-        <video autoplay id="localAudio" muted></video>
-      </div>
-      <div style="background-color: burlywood; padding: 16px">
-        <label for="remoteAudio">Remote Audio:</label>
-        <video autoplay id="remoteAudio"></video>
-      </div>
-    </section>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-      const socket = io("http://localhost:3000");
-      const roomInput = document.getElementById("roomInput");
-      const emailInput = document.getElementById("emailInput");
-      const localAudio = document.getElementById("localAudio");
-      const remoteAudio = document.getElementById("remoteAudio");
-      let localPeerConnection;
-      let remotePeerConnection;
-
-      function joinRoom() {
-        const roomName = roomInput.value;
-        const email = emailInput.value;
-        if (roomName.trim() === "") {
-          alert("Please enter a room name.");
-          return;
-        }
-        if (email.trim() === "") {
-          alert("Please enter your email Id.");
-          return;
-        }
-
-        socket.emit("join-room", { email, roomId: roomName });
-
-        localPeerConnection = new RTCPeerConnection({
+      socket.on("incoming-call", ({ from, offer }) => {
+        remotePeerConnection = new RTCPeerConnection({
           iceServers: [
             {
               urls: [
@@ -124,90 +161,55 @@
           ],
         });
         navigator.mediaDevices
-          .getUserMedia({ audio: true, video: true })
+          .getUserMedia({
+            audio: true,
+            video: false,
+          })
           .then((stream) => {
-            localAudio.srcObject = stream;
+            remoteAudio.srcObject = stream;
             stream.getTracks().forEach((track) => {
-              localPeerConnection.addTrack(track, stream);
+              remotePeerConnection.addTrack(track, stream);
             });
+            if (offer) {
+              console.log("Received offer:", offer);
+              remotePeerConnection.setRemoteDescription(
+                new RTCSessionDescription(offer)
+              );
+            } else {
+              console.error("Received null offer");
+            }
 
-            localPeerConnection
-              .createOffer()
-              .then((offer) => {
-                socket.emit("call-user", {
-                  to: roomName,
-                  offer,
-                });
-                localPeerConnection.setLocalDescription(offer);
-              })
-              .catch((error) => {
-                console.error("Error creating/Sending offer:", error);
-              });
+            console.log("Incoming call", from, offer);
+            return remotePeerConnection.createAnswer();
+          })
+          .then((answer) => {
+            socket.emit("call-accepted", { to: from, ans: answer });
+            remotePeerConnection.setLocalDescription(answer);
           })
           .catch((error) => {
-            console.error("Error accessing user media:", error);
+            console.log("Error answering  the call", error);
           });
+      });
 
-        socket.on("incoming-call", ({ from, offer }) => {
-          remotePeerConnection = new RTCPeerConnection({
-            iceServers: [
-              {
-                urls: [
-                  "stun:stun.l.google.com:19302",
-                  "stun:global.stun.twilio.com:3478",
-                ],
-              },
-            ],
-          });
-          navigator.mediaDevices
-            .getUserMedia({
-              audio: true,
-              video: true,
-            })
-            .then((stream) => {
-              remoteAudio.srcObject = stream;
-              stream.getTracks().forEach((track) => {
-                remotePeerConnection.addTrack(track, stream);
-              });
-              if (offer) {
-                console.log("Received offer:", offer);
-                remotePeerConnection.setRemoteDescription(
-                  new RTCSessionDescription(offer)
-                );
-              } else {
-                console.error("Received null offer");
-              }
+      socket.on("call-accepted", (answer) => {
+        localPeerConnection.setRemoteDescription(
+          new RTCSessionDescription(answer)
+        );
+      });
+    }
 
-              console.log("Incoming call", from, offer);
-              return remotePeerConnection.createAnswer();
-            })
-            .then((answer) => {
-              socket.emit("call-accepted", { to: from, ans: answer });
-              remotePeerConnection.setLocalDescription(answer);
-            })
-            .catch((error) => {
-              console.log("Error answering  the call", error);
-            });
-        });
-
-        socket.on("call-accepted", (answer) => {
-          localPeerConnection.setRemoteDescription(
-            new RTCSessionDescription(answer)
-          );
-        });
+    function leaveRoom() {
+      if (localPeerConnection) {
+        localPeerConnection.close();
+      }
+      if (remotePeerConnection) {
+        remotePeerConnection.close();
       }
 
-      function leaveRoom() {
-        if (localPeerConnection) {
-          localPeerConnection.close();
-        }
-        if (remotePeerConnection) {
-          remotePeerConnection.close();
-        }
+      localAudio.srcObject = null;
+      remoteAudio.srcObject = null;
+    }
+  </script>
+</body>
 
-        localAudio.srcObject = null;
-        remoteAudio.srcObject = null;
-      }
-    </script>
-  </body>
 </html>
