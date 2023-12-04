@@ -63,14 +63,6 @@
         width: 100%;
         margin-top: 16px;
       }
-
-      #localAudio {
-        background-color: antiquewhite;
-      }
-
-      #remoteAudio {
-        background-color: burlywood;
-      }
     </style>
   </head>
   <body>
@@ -82,23 +74,26 @@
       <div>
         <label for="roomInput">Room Name:</label>
         <input type="text" id="roomInput" />
+        <label for="emailInput"> Email:</label>
+        <input type="text" id="emailInput" />
         <button onclick="joinRoom()">Join Room</button>
         <button onclick="leaveRoom()">Leave Room</button>
       </div>
-      <div>
+      <div style="background-color: cadetblue; padding: 16px">
         <label for="localAudio">Local Audio:</label>
-        <audio id="localAudio" controls muted></audio>
+        <video autoplay id="localAudio" muted></video>
       </div>
       <div style="background-color: burlywood; padding: 16px">
         <label for="remoteAudio">Remote Audio:</label>
-        <audio id="remoteAudio" controls></audio>
+        <video autoplay id="remoteAudio"></video>
       </div>
     </section>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-      const socket = io();
+      const socket = io("http://localhost:3000");
       const roomInput = document.getElementById("roomInput");
+      const emailInput = document.getElementById("emailInput");
       const localAudio = document.getElementById("localAudio");
       const remoteAudio = document.getElementById("remoteAudio");
       let localPeerConnection;
@@ -106,89 +101,101 @@
 
       function joinRoom() {
         const roomName = roomInput.value;
+        const email = emailInput.value;
         if (roomName.trim() === "") {
           alert("Please enter a room name.");
           return;
         }
+        if (email.trim() === "") {
+          alert("Please enter your email Id.");
+          return;
+        }
 
-        socket.emit("createRoom", roomName);
+        socket.emit("join-room", { email, roomId: roomName });
 
-        localPeerConnection = new RTCPeerConnection();
+        localPeerConnection = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: [
+                "stun:stun.l.google.com:19302",
+                "stun:global.stun.twilio.com:3478",
+              ],
+            },
+          ],
+        });
         navigator.mediaDevices
-          .getUserMedia({ audio: true, video: false })
+          .getUserMedia({ audio: true, video: true })
           .then((stream) => {
             localAudio.srcObject = stream;
-            localPeerConnection.addStream(stream);
-
-            localPeerConnection.onicecandidate = (event) => {
-              if (event.candidate) {
-                socket.emit("iceCandidate", {
-                  room: roomName,
-                  candidate: event.candidate,
-                });
-              }
-            };
+            stream.getTracks().forEach((track) => {
+              localPeerConnection.addTrack(track, stream);
+            });
 
             localPeerConnection
               .createOffer()
-              .then((offer) => localPeerConnection.setLocalDescription(offer))
-              .then(() => {
-                socket.emit("offer", {
-                  room: roomName,
-                  offer: localPeerConnection.localDescription,
+              .then((offer) => {
+                socket.emit("call-user", {
+                  to: roomName,
+                  offer,
                 });
+                localPeerConnection.setLocalDescription(offer);
               })
               .catch((error) => {
-                console.error("Error creating offer:", error);
+                console.error("Error creating/Sending offer:", error);
               });
           })
           .catch((error) => {
             console.error("Error accessing user media:", error);
           });
 
-        socket.on("offer", (offer) => {
-          remotePeerConnection = new RTCPeerConnection();
+        socket.on("incoming-call", ({ from, offer }) => {
+          remotePeerConnection = new RTCPeerConnection({
+            iceServers: [
+              {
+                urls: [
+                  "stun:stun.l.google.com:19302",
+                  "stun:global.stun.twilio.com:3478",
+                ],
+              },
+            ],
+          });
           navigator.mediaDevices
-            .getUserMedia({ audio: true, video: false })
+            .getUserMedia({
+              audio: true,
+              video: true,
+            })
             .then((stream) => {
               remoteAudio.srcObject = stream;
-              remotePeerConnection.addStream(stream);
+              stream.getTracks().forEach((track) => {
+                remotePeerConnection.addTrack(track, stream);
+              });
+              if (offer) {
+                console.log("Received offer:", offer);
+                remotePeerConnection.setRemoteDescription(
+                  new RTCSessionDescription(offer)
+                );
 
-              remotePeerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                  socket.emit("iceCandidate", {
-                    room: roomName,
-                    candidate: event.candidate,
-                  });
-                }
-              };
+                // ... rest of the code
+              } else {
+                console.error("Received null offer");
+              }
 
-              remotePeerConnection.setRemoteDescription(
-                new RTCSessionDescription(offer)
-              );
-
+              console.log("Incoming call", from, offer);
               return remotePeerConnection.createAnswer();
             })
-            .then((answer) => remotePeerConnection.setLocalDescription(answer))
-            .then(() => {
-              socket.emit("answer", {
-                room: roomName,
-                answer: remotePeerConnection.localDescription,
-              });
+            .then((answer) => {
+              socket.emit("call-accepted", { to: from, ans: answer });
+              remotePeerConnection.setLocalDescription(answer);
             })
             .catch((error) => {
-              console.error("Error creating answer:", error);
+              console.log("Error answering  the call", error);
             });
         });
 
-        socket.on("answer", (answer) => {
+        socket.on("call-accepted", (answer) => {
           localPeerConnection.setRemoteDescription(
             new RTCSessionDescription(answer)
           );
-        });
-
-        socket.on("iceCandidate", (candidate) => {
-          localPeerConnection.addIceCandidate(new RTCIceCandidate(candidate));
         });
       }
 
